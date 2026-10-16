@@ -1,0 +1,48 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Common Ground — dinner a whole group will love</title>
+<style>
+:root{--bg:#0f1115;--card:#181b22;--ink:#eef0f5;--mut:#9aa3b5;--acc:#ff8a3d;--ok:#47d18c}
+*{box-sizing:border-box}body{margin:0;font:16px/1.5 system-ui,sans-serif;background:var(--bg);color:var(--ink)}
+main{max-width:980px;margin:0 auto;padding:28px 18px 60px}h1{margin:0;font-size:32px}h1 span{color:var(--acc)}
+.sub{color:var(--mut);margin:6px 0 22px}.card{background:var(--card);border-radius:14px;padding:16px;margin:12px 0}
+.people{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+input,textarea{width:100%;background:#0f1115;border:1px solid #2b3040;color:var(--ink);border-radius:8px;padding:9px;font:inherit}
+label{font-size:13px;color:var(--mut)}button{background:var(--acc);color:#1b1006;border:0;border-radius:10px;padding:11px 18px;font-weight:700;cursor:pointer;font-size:16px}
+button.ghost{background:#252a37;color:var(--ink);font-weight:500;padding:8px 12px;font-size:14px}button:disabled{opacity:.5}
+.row{display:flex;gap:10px;align-items:end;flex-wrap:wrap}.bar{height:8px;background:#252a37;border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ok)}
+.v{display:grid;grid-template-columns:1fr 1fr;gap:16px}@media(max-width:700px){.v{grid-template-columns:1fr}}
+.tag{display:inline-block;background:#252a37;border-radius:20px;padding:2px 10px;margin:2px;font-size:12px;color:var(--mut)}
+.trace{font:12px/1.5 ui-monospace,monospace;color:var(--mut);max-height:260px;overflow:auto}.err{color:#ff6b6b}h3{margin:.2em 0}
+</style></head><body><main>
+<h1>Common <span>Ground</span></h1>
+<p class="sub">Everyone in the group has different taste. Qloo's taste graph scores every venue for every person, and the agent picks the place nobody is sacrificed for — then builds the rest of the night.</p>
+<div class="card"><div class="row"><div style="flex:1;min-width:200px"><label>City</label><input id="city" value="Austin"></div>
+<button class="ghost" id="add">+ Add person</button><button class="ghost" id="demo">Fill example</button></div></div>
+<div class="people" id="people"></div>
+<p><button id="go">Find our common ground</button> <span id="status" class="sub"></span></p>
+<div id="out"></div>
+<script>
+const P=document.getElementById('people');
+function person(n='',f=''){const d=document.createElement('div');d.className='card';d.innerHTML=`<label>Name</label><input class=n value="${n}"><label>Favourites (comma-separated: artists, films, restaurants, shows, books…)</label><textarea class=f rows=3>${f}</textarea>`;P.appendChild(d)}
+document.getElementById('add').onclick=()=>P.children.length<5&&person();
+document.getElementById('demo').onclick=()=>{P.innerHTML='';person('Maya','Radiohead, Spirited Away, Franklin Barbecue');person('Dev','Kendrick Lamar, Breaking Bad, Torchy\'s Tacos');person('Sam','Taylor Swift, Bon Appetit, Odd Duck')};
+person();person();
+const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+document.getElementById('go').onclick=async e=>{
+  const btn=e.target,st=document.getElementById('status'),out=document.getElementById('out');
+  const people=[...P.children].map(d=>({name:d.querySelector('.n').value||'Guest',favorites:d.querySelector('.f').value.split(',').map(s=>s.trim()).filter(Boolean)})).filter(p=>p.favorites.length);
+  btn.disabled=true;st.textContent='Agent working: resolving tastes, scoring venues… (10–30 s)';out.innerHTML='';
+  try{const r=await fetch('/api/plan',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({city:document.getElementById('city').value,people})});
+    const j=await r.json();if(!r.ok)throw new Error(j.error||r.status);render(j);st.textContent=''}
+  catch(err){st.textContent='';out.innerHTML=`<p class=err>${esc(err.message)}</p>`}btn.disabled=false};
+function render(p){
+  const names=p.people.map(x=>x.name);
+  let h=p.narrative?`<div class=card>${esc(p.narrative)}</div>`:'';
+  h+=`<h3>Tonight's venues in ${esc(p.city)}</h3><div class=v>`+p.venues.map((v,i)=>`<div class=card><b>${i?'Runner-up':'Best for everyone'}: ${esc(v.name)}</b><br><small>${esc(v.address||'')}</small><div>${v.tags.map(t=>`<span class=tag>${esc(t)}</span>`).join('')}</div>`+
+   names.map(n=>{const a=Math.max(0,Math.min(1,v.per_person[n]??0));return `<small>${esc(n)} — taste fit ${(a*100).toFixed(0)}%</small><div class=bar><i style="width:${a*100}%"></i></div>`}).join('')+`<small>Worst-off fit: ${(v.worst_fit*100).toFixed(0)}%</small></div>`).join('')+`</div>`;
+  const L={music:'Soundtrack',watch:'Watch after',read:'Read later'};
+  h+=`<h3>The rest of the night (from everyone's taste + the venue)</h3><div class=v>`+Object.entries(p.extras).map(([k,l])=>`<div class=card><b>${L[k]||k}</b><br>${l.map(x=>esc(x.name)).join(' · ')||'—'}</div>`).join('')+`</div>`;
+  if(p.unmatched.length)h+=`<p class=err>Couldn't match any favourites for: ${esc(p.unmatched.join(', '))}</p>`;
+  h+=`<details class=card><summary>Agent trace (${p.trace.length} tool calls)</summary><div class=trace>`+p.trace.map(t=>`${t.step}. ${esc(t.tool)} ${esc(JSON.stringify(t.input))} → ${esc(t.summary)}`).join('<br>')+`</div></details>`;
+  document.getElementById('out').innerHTML=h}
+</script></main></body></html>
